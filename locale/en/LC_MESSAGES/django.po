@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2021-02-08 01:06+0100\n"
+"POT-Creation-Date: 2026-09-17 16:48+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,58 +17,76 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: payment/gql_mutations.py:36 payment/gql_mutations.py:36
-msgid "payment.gql.payment_base.premium_uuid"
-msgstr "UUID of the Premium"
+#: api_etl/gql_mutations.py:41
+msgid "There is no ETL service with provided name"
+msgstr ""
 
-#: payment/gql_mutations.py:66 payment/gql_mutations.py:66
-msgid "payment.mutation.failed_to_create_payment"
-msgstr "Failed to create the payment"
+#, fuzzy
+#~| msgid "payment.validation.detail.reject.no_premium"
+#~ msgid "payment_cycle.validation.payment_cycle.code_exists"
+#~ msgstr "Payment detail %(id)s could not identify a corresponding premium"
 
-#: payment/gql_mutations.py:96 payment/gql_mutations.py:96
-msgid "payment.mutation.failed_to_update_payment"
-msgstr "Failed to update the payment %(id)s"
+#, fuzzy
+#~| msgid "payment.validation.id_does_not_exist"
+#~ msgid "contract.validation.no_details"
+#~ msgstr "The payment with id %(id)s does not exist"
 
-#: payment/gql_mutations.py:125 payment/gql_mutations.py:125
-msgid "payment.validation.id_does_not_exist"
-msgstr "The payment with id %(id)s does not exist"
+#~ msgid "payment.gql.payment_base.premium_uuid"
+#~ msgstr "UUID of the Premium"
 
-#: payment/services.py:32
-msgid "payment.mutation.failed_to_delete_payment"
-msgstr "Failed to delete the payment %(uuid)s"
+#, fuzzy
+#~| msgid "payment.mutation.failed_to_update_payment"
+#~ msgid "payment.mutation.failed_to_create_payment"
+#~ msgstr "Failed to update the payment %(id)s"
 
-#: payment/services.py:47
-msgid "payment.mutation.failed_to_detach_payment_detail"
-msgstr "Failed to detach the payment detail %(payment_detail)s"
+#, fuzzy
+#~| msgid "payment.mutation.failed_to_update_payment"
+#~ msgid "payment.mutation.failed_to_update_payment"
+#~ msgstr "Failed to update the payment %(id)s"
 
-#: payment/services.py:300
-msgid "payment.validation.detail.reject.insurance_nb"
-msgstr "Payment detail %(id)s has no insurance number"
+#, fuzzy
+#~| msgid "payment.mutation.failed_to_delete_payment"
+#~ msgid "payment.mutation.failed_to_delete_payment"
+#~ msgstr "Failed to delete the payment %(uuid)s"
 
-#: payment/services.py:307
-msgid "payment.validation.detail.reject.product_code"
-msgstr "Payment detail %(id)s has no product code"
+#~ msgid "payment.mutation.failed_to_detach_payment_detail"
+#~ msgstr "Failed to detach the payment detail %(payment_detail)s"
 
-#: payment/services.py:319
-msgid "payment.validation.detail.reject.insurance_nb_invalid"
-msgstr "Payment detail %(id)s has an invalid insurance nb %(chf)s"
+#~ msgid "payment.validation.detail.reject.insurance_nb"
+#~ msgstr "Payment detail %(id)s has no insurance number"
 
-#: payment/services.py:334
-msgid "payment.validation.detail.reject.policy_not_found"
-msgstr "Payment detail %(id)s doesn't relate to a valid policy for insuree %(chf)s and product code %(product_code)s"
+#~ msgid "payment.validation.detail.reject.product_code"
+#~ msgstr "Payment detail %(id)s has no product code"
 
-#: payment/services.py:360
-msgid "payment.validation.detail.reject.product_not_allowed"
-msgstr "Payment detail %(id)s refers to a product %(product_code)s that is not allowed for insuree %(chf)s"
+#~ msgid "payment.validation.detail.reject.insurance_nb_invalid"
+#~ msgstr "Payment detail %(id)s has an invalid insurance nb %(chf)s"
 
-#: payment/services.py:374
-msgid "payment.validation.detail.reject.officer_not_found"
-msgstr "Payment detail %(id)s has an unknown officer code %(officer_code)s for insuree %(chf)s"
+#~ msgid "payment.validation.detail.reject.policy_not_found"
+#~ msgstr ""
+#~ "Payment detail %(id)s doesn't relate to a valid policy for insuree %"
+#~ "(chf)s and product code %(product_code)s"
 
-#: payment/services.py:390
-msgid "payment.validation.detail.reject.product_location"
-msgstr "Payment detail %(id)s has an invalid product %(product_code)s location for insuree %(chf)s"
+#~ msgid "payment.validation.detail.reject.product_not_allowed"
+#~ msgstr ""
+#~ "Payment detail %(id)s refers to a product %(product_code)s that is not "
+#~ "allowed for insuree %(chf)s"
 
-#: payment/services.py:403
-msgid "payment.validation.detail.reject.no_premium"
-msgstr "Payment detail %(id)s could not identify a corresponding premium"
+#~ msgid "payment.validation.detail.reject.officer_not_found"
+#~ msgstr ""
+#~ "Payment detail %(id)s has an unknown officer code %(officer_code)s for "
+#~ "insuree %(chf)s"
+
+#~ msgid "payment.validation.detail.reject.product_location"
+#~ msgstr ""
+#~ "Payment detail %(id)s has an invalid product %(product_code)s location "
+#~ "for insuree %(chf)s"
+
+#, fuzzy
+#~| msgid "payment.mutation.failed_to_update_payment"
+#~ msgid "payer.mutation.failed_to_add_funding"
+#~ msgstr "Failed to update the payment %(id)s"
+
+#, fuzzy
+#~| msgid "payment.mutation.failed_to_create_payment"
+#~ msgid "report.mutation.failed_to_override_report"
+#~ msgstr "Failed to create the payment"

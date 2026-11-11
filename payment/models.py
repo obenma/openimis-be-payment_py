@@ -2,9 +2,26 @@ import uuid
 
 from core import fields
 from core import models as core_models
+from django.conf import settings
 from django.db import models
 from contribution.models import Premium, PayTypeChoices
 from django.utils.translation import gettext_lazy as _
+
+
+def is_location_unrestricted(user):
+    """
+    True when `user` sees every location: row security off, an IMIS admin, or a
+    technical user (which the location filter leaves unfiltered as well). An anonymous
+    user (or none) is restricted.
+    """
+    if not settings.ROW_SECURITY:
+        return True
+    if user is None or getattr(user, "is_anonymous", True):
+        return False
+    interactive = getattr(user, "_u", user)
+    if not isinstance(interactive, core_models.InteractiveUser):
+        return True
+    return bool(interactive.is_imis_admin)
 
 
 class Payment(core_models.VersionedModel):
@@ -75,6 +92,27 @@ class Payment(core_models.VersionedModel):
     # auditED, not audit ???
     # auditeduser_id = models.IntegerField(db_column='AuditedUSerID', blank=True, null=True)
 
+    @classmethod
+    def get_queryset(cls, queryset, user=None, *, validity=None, audits=None):
+        """
+        The payments `user` may see; current ones unless validity / audits ask otherwise
+        (OP-2029).
+
+        A payment has no location of its own: it is visible when one of its current
+        details is (i.e. the premium it is matched to, see PaymentDetail.get_queryset).
+        A payment without any matched detail (not matched yet, or detached) is visible
+        only to a user who is not location restricted (IMIS admin, technical user, or
+        row security off). The audit copies of a visible payment (legacy_id) follow it.
+        """
+        queryset = cls.apply_row_filters(queryset, validity, audits, default=cls.filter_queryset)
+        user = cls.scoping_user(user)
+        if settings.ROW_SECURITY and (user is None or getattr(user, "is_anonymous", True)):
+            return queryset.none()
+        if is_location_unrestricted(user):
+            return queryset
+        visible = PaymentDetail.get_queryset(PaymentDetail.objects.all(), user).values("payment_id")
+        return queryset.filter(models.Q(id__in=visible) | models.Q(legacy_id__in=visible))
+
     class Meta:
         managed = True
         db_table = 'tblPayment'
@@ -85,6 +123,10 @@ class Payment(core_models.VersionedModel):
 
 
 class PaymentDetail(core_models.VersionedModel):
+    # a payment detail is seen by whoever sees its premium (i.e. its policy); a detail
+    # matched to no premium has nothing to be located by (see get_queryset)
+    row_scope = core_models.ParentScope("premium", allow_null=False)
+
     id = models.BigAutoField(db_column='PaymentDetailsID', primary_key=True)
 
     payment = models.ForeignKey(
@@ -115,6 +157,22 @@ class PaymentDetail(core_models.VersionedModel):
     # ! auditED in field name
     audit_user_id = models.IntegerField(
         db_column='AuditedUserId', blank=True, null=True)
+
+    @classmethod
+    def get_queryset(cls, queryset, user=None, *, validity=None, audits=None):
+        """
+        The payment details of the premiums `user` may see; current ones unless
+        validity / audits ask otherwise (OP-2029). A detail matched to no premium is
+        left to the users who are not location restricted: the composed location path
+        would otherwise let it through on its null location.
+        """
+        queryset = cls.apply_row_filters(queryset, validity, audits, default=cls.filter_queryset)
+        user = cls.scoping_user(user)
+        if settings.ROW_SECURITY and (user is None or getattr(user, "is_anonymous", True)):
+            return queryset.none()
+        if is_location_unrestricted(user):
+            return queryset
+        return cls.row_scope.filter(queryset.filter(premium__isnull=False), user, cls)
 
     class Meta:
         managed = True

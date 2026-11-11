@@ -1,10 +1,11 @@
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ValidationError, PermissionDenied
 from payment.apps import PaymentConfig
-from payment.models import Payment, PaymentMutation
+from payment.models import Payment, PaymentDetail, PaymentMutation
 from policy import models as policy_models
 from payment.services import update_or_create_payment, detach_payment_detail, set_payment_deleted, \
-    update_or_create_payment_detail
+    update_or_create_payment_detail, scoped_payment, scoped_premium
+from core.models import Audits, Validity
 from typing import Optional
 
 import graphene
@@ -55,8 +56,11 @@ class CreatePaymentMutation(OpenIMISMutation):
             if not user.has_perms(PaymentConfig.gql_mutation_create_payments_perms):
                 raise PermissionDenied(_("unauthorized"))
             premium_uuid = data.pop("premium_uuid") if "premium_uuid" in data else None
+            # the premium is looked up within the user's scope before anything is written
+            if premium_uuid and scoped_premium(user, premium_uuid) is None:
+                raise PermissionDenied(_("unauthorized"))
             client_mutation_id = data.get("client_mutation_id")
-            payment = update_or_create_payment(data, user)
+            payment = update_or_create_payment(data, user, update=False)
             if premium_uuid:
                 update_or_create_payment_detail(payment, premium_uuid, user)
             PaymentMutation.object_mutated(user, client_mutation_id=client_mutation_id, payment=payment)
@@ -87,16 +91,18 @@ class UpdatePaymentMutation(OpenIMISMutation):
             if not user.has_perms(PaymentConfig.gql_mutation_update_payments_perms):
                 raise PermissionDenied(_("unauthorized"))
             premium_uuid = data.pop("premium_uuid") if "premium_uuid" in data else None
-            payment = update_or_create_payment(data, user)
+            # the payment updated and the premium linked: within the user's scope
+            if premium_uuid and scoped_premium(user, premium_uuid) is None:
+                raise PermissionDenied(_("unauthorized"))
+            payment = update_or_create_payment(data, user, update=True)
             if premium_uuid:
                 update_or_create_payment_detail(payment, premium_uuid, user)
             return None
         except Exception as exc:
             return [{
-                'message': _("payment.mutation.failed_to_update_payment") %
-                           {'id': data.get('id') if data else None},
-                'detail': str(exc)}
-            ]
+                'message': _("payment.mutation.failed_to_update_payment") % {'id': data.get('uuid') if data else None},
+                'detail': str(exc)
+            }]
 
 
 class DeletePaymentsMutation(OpenIMISMutation):
@@ -115,9 +121,8 @@ class DeletePaymentsMutation(OpenIMISMutation):
             raise PermissionDenied(_("unauthorized"))
         errors = []
         for payment_uuid in data["uuids"]:
-            payment = Payment.objects \
-                .filter(uuid=payment_uuid) \
-                .first()
+            # a payment out of the user's scope (or already deleted) does not exist for them
+            payment = scoped_payment(user, payment_uuid)
             if payment is None:
                 errors.append({
                     'title': payment_uuid,
@@ -125,21 +130,28 @@ class DeletePaymentsMutation(OpenIMISMutation):
                         "payment.validation.id_does_not_exist") % {'id': payment_uuid}}]
                 })
                 continue
-            errors += set_payment_deleted(payment)
+            failure = set_payment_deleted(payment)
+            if failure:
+                errors.append(failure)
         if len(errors) == 1:
             errors = errors[0]['list']
         return errors
 
 
 def on_policy_mutation(sender, **kwargs):
+    """
+    After a DeletePoliciesMutation (bound to the after-mutating signal: the policy
+    mutation has checked its rights and scope): the current payment details of the
+    premiums of the policies it did delete are detached from them. A policy it refused
+    is still current and its payments stay matched.
+    """
     errors = []
     if kwargs.get("mutation_class") == 'DeletePoliciesMutation':
         uuids = kwargs['data'].get('uuids', [])
-        policies = policy_models.Policy.objects.prefetch_related("premiums__payment_details").filter(uuid__in=uuids).all()
-        for policy in policies:
-            for premium in policy.premiums.all():
-                for payment_detail in premium.payment_details.all():
-                    errors += detach_payment_detail(payment_detail)
+        deleted = policy_models.Policy.objects.filter(uuid__in=uuids, validity_to__isnull=False)
+        for payment_detail in PaymentDetail.objects.filter(
+                premium__policy__in=deleted, validity_to__isnull=True):
+            errors += detach_payment_detail(payment_detail)
     return errors
 
 
@@ -150,7 +162,9 @@ def on_payment_mutation(sender, **kwargs):
         uuids = [uuid] if uuid else []
     if not uuids:
         return []
-    impacted_payments = Payment.objects.filter(uuid__in=uuids).all()
+    # only the payments the user may see get the mutation linked
+    impacted_payments = Payment.get_queryset(
+        Payment.objects.filter(uuid__in=uuids), kwargs.get('user'), validity=Validity.ALL, audits=Audits.ALL)
     for payment in impacted_payments:
         PaymentMutation.objects.get_or_create(payment=payment, mutation_id=kwargs['mutation_log_id'])
     return []

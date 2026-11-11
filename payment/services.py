@@ -21,6 +21,7 @@ logger = logging.getLogger(__file__)
 
 
 def set_payment_deleted(payment):
+    """Delete `payment` and its current details; [] or the error (a dict) on failure."""
     try:
         for pd in payment.payment_details.filter(validity_to__isnull=True):
             pd.delete_history()
@@ -42,12 +43,13 @@ def detach_payment_detail(payment_detail):
         payment_detail.premium = None
         payment_detail.save()
         return []
-    except Exception as exc:
+    except Exception:
+        # a payment detail has no uuid
         return [{
-            'title': payment_detail.uuid,
+            'title': payment_detail.id,
             'list': [{
                 'message': _("payment.mutation.failed_to_detach_payment_detail") % {'payment_detail': str(payment_detail)},
-                'detail': payment_detail.uuid}]
+                'detail': payment_detail.id}]
         }]
 
 
@@ -71,11 +73,34 @@ def reset_payment_before_update(payment):
     payment.transfer_fee = None
 
 
-def update_or_create_payment(data, user):
+def scoped_payment(user, payment_uuid):
+    """The current payment `payment_uuid` if `user` may see it (Payment.get_queryset)."""
+    if not payment_uuid:
+        return None
+    return Payment.get_queryset(Payment.objects.filter(uuid=payment_uuid), user).first()
+
+
+def scoped_premium(user, premium_uuid):
+    """The current premium `premium_uuid` if `user` may see it (its policy in scope)."""
+    if not premium_uuid:
+        return None
+    return Premium.get_queryset(Premium.objects.filter(uuid=premium_uuid), user).first()
+
+
+def update_or_create_payment(data, user, update=None):
+    """
+    Create (`update` False) or update (`update` True) the payment of `data`; `update`
+    None (the legacy behaviour) updates when `data` carries a uuid. The payment updated
+    is looked up within the user's scope (Payment.get_queryset): a uuid the user may
+    not see does not exist for them. A creation refuses a uuid already taken. An `id`
+    from the client is ignored: the row is designated by its uuid only.
+    """
     if "client_mutation_id" in data:
         data.pop('client_mutation_id')
     if "client_mutation_label" in data:
         data.pop('client_mutation_label')
+    # graphene does not enforce read_only: an id would be set on the row saved
+    data.pop('id', None)
     from core import datetime
     now = datetime.datetime.now()
     # No audit here
@@ -83,18 +108,29 @@ def update_or_create_payment(data, user):
     data.pop("rejected_reason", None)
     data['validity_from'] = now
     payment_uuid = data.pop("uuid") if "uuid" in data else None
-    if payment_uuid:
-        payment = Payment.objects.get(uuid=payment_uuid)
+    if update is None:
+        update = bool(payment_uuid)
+    if update:
+        payment = scoped_payment(user, payment_uuid)
+        if payment is None:
+            raise Exception(_("payment.validation.id_does_not_exist") % {'id': payment_uuid})
         payment.save_history()
         reset_payment_before_update(payment)
         [setattr(payment, k, v) for k, v in data.items()]
         payment.save()
     else:
+        if payment_uuid:
+            if Payment.objects.filter(uuid=payment_uuid).exists():
+                raise Exception(_("payment.validation.uuid_already_taken") % {'id': payment_uuid})
+            data['uuid'] = payment_uuid
         payment = Payment.objects.create(**data)
     return payment
 
 
 def update_or_create_payment_detail(payment, premium_uuid, user):
+    """Link `payment` to the premium `premium_uuid`, which `user` must be able to see."""
+    if scoped_premium(user, premium_uuid) is None:
+        raise Exception(_("payment.validation.premium_not_found") % {'id': premium_uuid})
     premium = Premium.filter_queryset()\
         .filter(uuid=premium_uuid)\
         .select_related("policy__family__head_insuree")\
@@ -110,7 +146,9 @@ def update_or_create_payment_detail(payment, premium_uuid, user):
                 "policy__family__head_insuree__chf_id",
                 "policy__product__code")\
         .first()
-    payment_detail, _ = PaymentDetail.objects.update_or_create(
+    if premium is None:
+        raise Exception(_("payment.validation.premium_not_found") % {'id': premium_uuid})
+    payment_detail, _created = PaymentDetail.objects.update_or_create(
         payment=payment, premium_id=premium["id"],
         defaults=dict(
             audit_user_id=user.id_for_audit,

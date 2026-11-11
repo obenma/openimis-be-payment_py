@@ -6,7 +6,10 @@ from payment.services import detach_payment_detail
 
 from .apps import PaymentConfig
 from django.utils.translation import gettext as _
-from core.schema import signal_mutation_module_before_mutating, OrderedDjangoFilterConnectionField, filter_validity
+from core.schema import signal_mutation_module_before_mutating, signal_mutation_module_after_mutating, \
+    OrderedDjangoFilterConnectionField
+from core.gql import legacy_row_filters, row_filter_arguments
+from core.models import Audits, Validity
 from contribution import models as contribution_models
 from .models import Payment, PaymentDetail
 # We do need all queries and mutations in the namespace here.
@@ -18,7 +21,7 @@ from .signals import signal_before_payment_query, _read_signal_results
 class Query(graphene.ObjectType):
     payments = OrderedDjangoFilterConnectionField(
         PaymentGQLType,
-        show_history=graphene.Boolean(),
+        **row_filter_arguments(),
         show_reconciled=graphene.Boolean(),
         client_mutation_id=graphene.String(),
         orderBy=graphene.List(of_type=graphene.String),
@@ -27,11 +30,13 @@ class Query(graphene.ObjectType):
     )
     payment_details = OrderedDjangoFilterConnectionField(
         PaymentDetailGQLType,
+        **row_filter_arguments(),
         orderBy=graphene.List(of_type=graphene.String),
     )
     payments_by_premiums = OrderedDjangoFilterConnectionField(
         PaymentGQLType,
         premium_uuids=graphene.List(graphene.String, required=True),
+        **row_filter_arguments(),
         orderBy=graphene.List(of_type=graphene.String),
     )
 
@@ -56,9 +61,14 @@ class Query(graphene.ObjectType):
         if client_mutation_id:
             filters.append(
                 Q(mutations__mutation__client_mutation_id=client_mutation_id))
-        show_history = kwargs.get('show_history', False)
-        if not show_history and not kwargs.get('uuid', None):
-            filters += filter_validity(**kwargs)
+        # validity / audits are applied by Payment.get_queryset (OP-2029), and so is the
+        # row scope (PaymentGQLType); showHistory and a lookup by uuid keep their legacy
+        # meaning: no validity filter at all
+        everything = kwargs.get('show_history', False) or kwargs.get('uuid', None)
+        legacy_row_filters(
+            info, kwargs,
+            validity=Validity.ALL if everything else Validity.NOW,
+            audits=Audits.ALL if everything else None)
         show_reconciled = kwargs.get('show_reconciled', False)
         if show_reconciled:
             filters.append(
@@ -70,15 +80,24 @@ class Query(graphene.ObjectType):
     def resolve_payment_details(self, info, **kwargs):
         if not info.context.user.has_perms(PaymentConfig.gql_query_payments_perms):
             raise PermissionDenied(_("unauthorized"))
-        pass
+        # it returned None, i.e. the whole table: the details are now narrowed to the
+        # premiums the user may see by PaymentDetail.get_queryset (PaymentDetailGQLType),
+        # current ones by default (OP-2029)
+        legacy_row_filters(info, kwargs, validity=Validity.NOW)
+        return PaymentDetail.objects.all()
 
     def resolve_payments_by_premiums(self, info, **kwargs):
         if not info.context.user.has_perms(PaymentConfig.gql_query_payments_perms):
             raise PermissionDenied(_("unauthorized"))
-        premiums = contribution_models.Premium.objects.values_list(
-            'id').filter(Q(uuid__in=kwargs.get('premium_uuids')))
-        detail_ids = PaymentDetail.objects.values_list('payment_id').filter(Q(premium_id__in=premiums),
-                                                                            *filter_validity(**kwargs)).distinct()
+        # only the premiums the user may see (a deleted one included, as before); the
+        # payments themselves are narrowed by Payment.get_queryset (PaymentGQLType)
+        user = info.context.user
+        premiums = contribution_models.Premium.get_queryset(
+            contribution_models.Premium.objects.filter(uuid__in=kwargs.get('premium_uuids')),
+            user, validity=Validity.ALL).values('id')
+        detail_ids = PaymentDetail.get_queryset(
+            PaymentDetail.objects.filter(premium_id__in=premiums), user).values('payment_id')
+        legacy_row_filters(info, kwargs, validity=Validity.NOW)
         return Payment.objects.filter(Q(id__in=detail_ids))
 
 
@@ -89,10 +108,10 @@ class Mutation(graphene.ObjectType):
 
 
 def bind_signals():
-    signal_mutation_module_before_mutating["policy"].connect(
-        on_policy_mutation)
-    signal_mutation_module_before_mutating["payment"].connect(
-        on_payment_mutation)
+    # after the policy mutation, which checked its rights and scope: the payment details
+    # of the policies it did delete are detached (it ran before, for any policy named)
+    signal_mutation_module_after_mutating["policy"].connect(on_policy_mutation)
+    signal_mutation_module_before_mutating["payment"].connect(on_payment_mutation)
 
 
 def _get_additional_filter(sender, additional_filter, user):

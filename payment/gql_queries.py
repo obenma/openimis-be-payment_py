@@ -4,6 +4,7 @@ from graphene_django import DjangoObjectType
 from .apps import PaymentConfig
 from .models import Payment, PaymentDetail, PaymentMutation
 from core import prefix_filterset, ExtendedConnection
+from core.gql.scoped_object_type import ScopedQuerysetMixin
 from django.utils.translation import gettext as _
 from django.core.exceptions import PermissionDenied
 
@@ -11,7 +12,7 @@ from django.core.exceptions import PermissionDenied
 from contribution.schema import PremiumGQLType
 
 
-class PaymentGQLType(DjangoObjectType):
+class PaymentGQLType(ScopedQuerysetMixin, DjangoObjectType):
     client_mutation_id = graphene.String()
 
     class Meta:
@@ -50,7 +51,7 @@ class PaymentGQLType(DjangoObjectType):
         return payment_mutation.mutation.client_mutation_id if payment_mutation else None
 
 
-class PaymentDetailGQLType(DjangoObjectType):
+class PaymentDetailGQLType(ScopedQuerysetMixin, DjangoObjectType):
     class Meta:
         model = PaymentDetail
         interfaces = (graphene.relay.Node,)

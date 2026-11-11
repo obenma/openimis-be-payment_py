@@ -10,18 +10,16 @@ from django.utils.translation import gettext_lazy as _
 
 def is_location_unrestricted(user):
     """
-    True when `user` sees every location: row security off, an IMIS admin, or a
-    technical user (which the location filter leaves unfiltered as well). An anonymous
-    user (or none) is restricted.
+    True when `user` sees every location: row security off, an IMIS admin, a holder of
+    the unscoped-location right, or a technical user (see location.models.
+    is_location_unscoped). An anonymous user (or none) is restricted.
     """
     if not settings.ROW_SECURITY:
         return True
     if user is None or getattr(user, "is_anonymous", True):
         return False
-    interactive = getattr(user, "_u", user)
-    if not isinstance(interactive, core_models.InteractiveUser):
-        return True
-    return bool(interactive.is_imis_admin)
+    from location.models import is_location_unscoped
+    return is_location_unscoped(user)
 
 
 class Payment(core_models.VersionedModel):
